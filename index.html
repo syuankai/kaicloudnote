@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>公共雲筆記 (無需登入)</title>
+    <title>公共雲筆記免費的在線雲筆記</title>
     <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 載入 Google Font "Inter" -->
@@ -113,7 +113,7 @@
     <!-- 應用程式邏輯 -->
     <script type="module">
         // **重要：請檢查並替換成您實際的 Cloudflare Worker URL**
-        const API_BASE_URL = 'https://my-notes-worker.kai1020622.workers.dev'; 
+        const API_BASE_URL = 'https://my-notes-worker.kai1020622.workers.dev/api/notes'; 
         
         // --- 初始化應用程式 ---
         function initApp() {
