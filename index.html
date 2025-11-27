@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雲筆記 (Firebase 驗證版)</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Google Font "Inter" -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- 載入 Firebase SDK -->
+    <!-- 使用相容性版本 (compat) 以確保最佳相容性 -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            /* Tailwind config: 使用 class 策略來切換黑暗模式 */
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #f97316; /* Cloudflare 橙色 */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        .dark .loader {
+            border-color: #374151; /* dark:bg-gray-700 的邊框 */
+            border-top-color: #f97316; /* 保持橙色 */
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<!-- 應用程式主體，切換 'dark' class 來啟用黑暗模式 -->
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 transition-colors duration-300">
+
+    <div class="flex flex-col h-screen">
+        <!-- 頂部導覽列 -->
+        <header class="bg-white dark:bg-gray-800 shadow-md w-full p-4 flex justify-between items-center transition-colors duration-300">
+            <h1 class="text-xl font-bold text-orange-600">私人雲筆記 (Firebase 驗證版)</h1>
+            <div id="auth-controls" class="flex items-center space-x-4">
+                
+                <!-- 黑暗模式切換按鈕 -->
+                <button id="theme-toggle" class="p-2 rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition">
+                    <!-- 月亮圖示 (黑暗模式時顯示) -->
+                    <svg id="moon-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:none;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    </svg>
+                    <!-- 太陽圖示 (光明模式時顯示) -->
+                    <svg id="sun-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:none;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
+                </button>
+
+                <div id="auth-status" class="text-sm text-gray-500 dark:text-gray-400">
+                    狀態: <span id="connection-status" class="font-semibold text-red-500">未登入</span>
+                </div>
+                <button id="sign-in-btn" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-1 px-3 rounded-lg shadow transition duration-200">
+                    使用 Google 登入
+                </button>
+                <button id="sign-out-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-1 px-3 rounded-lg shadow transition duration-200" style="display: none;">
+                    登出
+                </button>
+            </div>
+        </header>
+
+        <!-- 主內容區 -->
+        <div class="flex flex-1 overflow-hidden flex-col md:flex-row">
+            
+            <!-- 筆記列表 (側邊欄) -->
+            <aside class="w-full md:w-1/3 lg:w-1/4 bg-white dark:bg-gray-800 border-r dark:border-gray-700 overflow-y-auto p-4 transition-colors duration-300">
+                <button id="new-note-btn" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 mb-4" disabled>
+                    + 新增筆記 (請先登入)
+                </button>
+                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-gray-100">我的筆記</h2>
+                <div id="notes-list" class="space-y-2">
+                    <p class="text-gray-500 dark:text-gray-400">請先登入以載入筆記...</p>
+                </div>
+            </aside>
+
+            <!-- 筆記編輯器 -->
+            <main class="flex-1 overflow-y-auto p-6">
+                <div id="editor-container" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg dark:shadow-xl dark:shadow-gray-700/30 transition-colors duration-300" style="display: none;">
+                    <div id="loading-spinner" class="loader mx-auto mb-4" style="display: none;"></div>
+                    <input type="text" id="note-title" 
+                           class="w-full text-3xl font-bold p-2 border-b-2 border-gray-200 dark:border-gray-600 
+                                  bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100
+                                  focus:outline-none focus:border-orange-500 transition-colors duration-300" 
+                           placeholder="筆記標題...">
+                    <textarea id="note-content" 
+                              class="w-full h-96 p-2 border border-gray-200 dark:border-gray-600 
+                                     bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 
+                                     rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 mt-4 transition-colors duration-300" 
+                              placeholder="開始寫點什麼..."></textarea>
+                    
+                    <input type="hidden" id="current-note-id">
+                    
+                    <div class="flex justify-end space-x-4 mt-4">
+                        <button id="delete-note-btn" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200" style="display: none;">
+                            刪除
+                        </button>
+                        <button id="save-note-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200">
+                            儲存
+                        </button>
+                    </div>
+                    <div id="save-status" class="text-sm text-gray-500 dark:text-gray-400 mt-2 text-right"></div>
+                </div>
+                <div id="welcome-message" class="text-center p-10">
+                    <h2 class="text-2xl font-semibold text-gray-600 dark:text-gray-400">歡迎使用私人雲筆記</h2>
+                    <p class="text-gray-500 dark:text-gray-500 mt-2">請點擊右上角的 "使用 Google 登入" 以開始使用。</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 應用程式邏輯 -->
+    <script type="module">
+        // 這是您的 Cloudflare Worker 服務的根 URL (已確認)
+        const API_BASE_URL = 'https://my-notes-worker.kai1020622.workers.dev'; 
+        
+        // 這是您提供的 Firebase 專案配置 (已填寫)
+        const firebaseConfig = {
+            apiKey: "AIzaSyA1xRP7UUuP3D1ziFuPvf1pWdrtItRfSRc",
+            authDomain: "mycloudnotesso.firebaseapp.com",
+            projectId: "mycloudnotesso",
+            storageBucket: "mycloudnotesso.firebasestorage.app",
+            messagingSenderId: "311115834654",
+            appId: "1:311115834654:web:faf17a74fcd88d6900150f",
+        };
+        
+        // --- Firebase 初始化 ---
+        const app = firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        // Google 登入提供者
+        const provider = new firebase.auth.GoogleAuthProvider();
+        
+        let currentUser = null; // 當前登入的用戶
+        
+        // --- DOM 元素獲取 ---
+        const notesList = document.getElementById('notes-list');
+        const newNoteBtn = document.getElementById('new-note-btn');
+        const saveNoteBtn = document.getElementById('save-note-btn');
+        const deleteNoteBtn = document.getElementById('delete-note-btn');
+        const noteTitle = document.getElementById('note-title');
+        const noteContent = document.getElementById('note-content');
+        const currentNoteId = document.getElementById('current-note-id');
+        const editorContainer = document.getElementById('editor-container');
+        const welcomeMessage = document.getElementById('welcome-message');
+        const saveStatus = document.getElementById('save-status');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const connectionStatus = document.getElementById('connection-status');
+        const signInBtn = document.getElementById('sign-in-btn');
+        const signOutBtn = document.getElementById('sign-out-btn');
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const sunIcon = document.getElementById('sun-icon');
+        const moonIcon = document.getElementById('moon-icon');
+        
+        // --- 黑暗模式邏輯 ---
+        
+        // 切換主題
+        function toggleTheme() {
+            const isDarkMode = document.body.classList.toggle('dark');
+            localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+            updateThemeIcons(isDarkMode);
+        }
+
+        // 根據儲存的偏好設定或系統偏好設定初始化主題
+        function initializeTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            
+            // 如果儲存了 'dark' 或是未儲存但系統偏好為暗色，則啟用暗色模式
+            const shouldBeDark = savedTheme === 'dark' || (savedTheme === null && prefersDark);
+
+            if (shouldBeDark) {
+                document.body.classList.add('dark');
+            }
+            updateThemeIcons(shouldBeDark);
+
+            themeToggleBtn.addEventListener('click', toggleTheme);
+        }
+
+        // 更新太陽/月亮圖示
+        function updateThemeIcons(isDark) {
+            moonIcon.style.display = isDark ? 'none' : 'block'; // 如果是暗色模式，顯示太陽 (切換到亮色)
+            sunIcon.style.display = isDark ? 'block' : 'none'; // 如果是亮色模式，顯示月亮 (切換到暗色)
+        }
+        
+        // 在 DOMContentLoaded 後執行主題初始化
+        document.addEventListener('DOMContentLoaded', initializeTheme);
+        
+        // --- 身份驗證控制 ---
+        
+        // 登入
+        signInBtn.addEventListener('click', () => {
+            // 使用彈出視窗進行登入
+            auth.signInWithPopup(provider).catch((error) => {
+                console.error("登入失敗:", error);
+                alert(`登入失敗: ${error.message}`);
+            });
+        });
+        
+        // 登出
+        signOutBtn.addEventListener('click', () => {
+            auth.signOut().then(() => {
+                // onAuthStateChanged 會自動處理 UI 重置
+            }).catch((error) => {
+                console.error("登出失敗:", error);
+                alert(`登出失敗: ${error.message}`);
+            });
+        });
+
+        // 監聽身份驗證狀態變化 (核心邏輯)
+        auth.onAuthStateChanged((user) => {
+            currentUser = user;
+            if (user) {
+                // 已登入
+                connectionStatus.textContent = `已登入 (${user.displayName})`;
+                connectionStatus.classList.remove('text-red-500');
+                connectionStatus.classList.add('text-green-600');
+                signInBtn.style.display = 'none';
+                signOutBtn.style.display = 'inline-block';
+                newNoteBtn.disabled = false;
+                newNoteBtn.textContent = '+ 新增筆記';
+                
+                loadNotes();
+
+            } else {
+                // 未登入
+                connectionStatus.textContent = '未登入';
+                connectionStatus.classList.remove('text-green-600');
+                connectionStatus.classList.add('text-red-500');
+                signInBtn.style.display = 'inline-block';
+                signOutBtn.style.display = 'none';
+                newNoteBtn.disabled = true;
+                newNoteBtn.textContent = '+ 新增筆記 (請先登入)';
+
+                notesList.innerHTML = '<p class="text-gray-500 dark:text-gray-400">請先登入以載入筆記...</p>';
+                editorContainer.style.display = 'none';
+                welcomeMessage.style.display = 'block';
+            }
+        });
+        
+        // --- API 請求助手 (自動附加 Firebase Token) ---
+        async function apiFetch(method, endpointPath, data = null) {
+            if (!currentUser) {
+                throw new Error("User not authenticated. Please sign in.");
+            }
+            
+            // 獲取最新的 Firebase ID Token，用於 Worker 驗證
+            const token = await currentUser.getIdToken();
+            
+            const fullUrl = API_BASE_URL + endpointPath;
+
+            const headers = {
+                'Content-Type': 'application/json',
+                // 將 Token 放在 Authorization Header 中傳遞
+                'Authorization': `Bearer ${token}` 
+            };
+            
+            try {
+                const response = await fetch(fullUrl, {
+                    method: method,
+                    headers: headers,
+                    body: data ? JSON.stringify(data) : null
+                });
+
+                if (!response.ok) {
+                    let errorBody = { message: response.statusText };
+                    try {
+                        errorBody = await response.json();
+                    } catch (e) {}
+                    throw new Error(`API 錯誤: ${response.status} - ${errorBody.message || response.statusText}`);
+                }
+                
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    return await response.json();
+                }
+                return null;
+
+            } catch (error) {
+                console.error("API 請求失敗:", error);
+                throw error;
+            }
+        }
+
+        // --- 核心功能實現 ---
+
+        async function loadNotes() {
+            if (!currentUser) return;
+
+            notesList.innerHTML = '<p class="text-gray-500 flex items-center dark:text-gray-400"><span class="loader w-4 h-4 mr-2"></span> 載入中...</p>';
+            try {
+                // 請求 API 時會自動帶上 Token，Worker 根據 user_id 過濾資料
+                const notes = await apiFetch('GET', '/api/notes');
+
+                renderNotesList(notes);
+                
+                if (notes.length > 0) {
+                    // 預設顯示第一篇筆記
+                    displayNoteInEditor(notes[0].id, notes[0].title, notes[0].content);
+                } else {
+                    welcomeMessage.style.display = 'block';
+                    editorContainer.style.display = 'none';
+                }
+            } catch (error) {
+                notesList.innerHTML = `<p class="text-red-500">載入失敗！請檢查 Worker Log。 (${error.message})</p>`;
+            }
+        }
+
+        function renderNotesList(notes) {
+            notesList.innerHTML = '';
+            if (!notes || notes.length === 0) {
+                notesList.innerHTML = '<p class="text-gray-500 dark:text-gray-400">尚無筆記。點擊上方按鈕新增一篇！</p>';
+                return;
+            }
+
+            notes.forEach((note) => {
+                const noteElement = document.createElement('div');
+                // 黑暗模式樣式更新
+                noteElement.className = 'p-3 bg-gray-100 dark:bg-gray-700 hover:bg-orange-100 dark:hover:bg-orange-700/50 rounded-lg cursor-pointer transition duration-150 text-gray-800 dark:text-gray-100';
+                noteElement.textContent = note.title || '(無標題)';
+                noteElement.dataset.noteId = note.id; 
+                
+                noteElement.addEventListener('click', () => {
+                    displayNoteInEditor(note.id, note.title, note.content);
+                });
+                
+                notesList.appendChild(noteElement);
+            });
+        }
+
+        function displayNoteInEditor(id, title, content) {
+            editorContainer.style.display = 'block';
+            welcomeMessage.style.display = 'none';
+            deleteNoteBtn.style.display = 'inline-block';
+
+            noteTitle.value = title || '';
+            noteContent.value = content || '';
+            currentNoteId.value = id;
+            saveStatus.textContent = '';
+
+            // 設置當前選中的樣式
+            document.querySelectorAll('#notes-list div').forEach(el => {
+                el.classList.remove('ring-2', 'ring-orange-500');
+            });
+            const activeNote = document.querySelector(`[data-note-id="${id}"]`);
+            if (activeNote) {
+                activeNote.classList.add('ring-2', 'ring-orange-500');
+            }
+        }
+
+        newNoteBtn.addEventListener('click', () => {
+            if (!currentUser) return;
+            editorContainer.style.display = 'block';
+            welcomeMessage.style.display = 'none';
+            deleteNoteBtn.style.display = 'none'; // 新筆記不能刪除
+            
+            // 清空編輯器
+            noteTitle.value = '';
+            noteContent.value = '';
+            currentNoteId.value = '';
+            noteTitle.focus();
+            saveStatus.textContent = '請輸入新筆記的內容。';
+            
+            // 清除選中樣式
+            document.querySelectorAll('#notes-list div').forEach(el => {
+                el.classList.remove('ring-2', 'ring-orange-500');
+            });
+        });
+
+        saveNoteBtn.addEventListener('click', async () => {
+            if (!currentUser) { saveStatus.textContent = '請先登入！'; return; }
+            const title = noteTitle.value || '(無標題)';
+            const content = noteContent.value;
+            const noteId = currentNoteId.value;
+
+            // 顯示載入狀態
+            loadingSpinner.style.display = 'block';
+            saveNoteBtn.disabled = true;
+            deleteNoteBtn.disabled = true;
+            saveStatus.textContent = '儲存中...';
+
+            try {
+                if (noteId) {
+                    // 更新現有筆記 (PUT)
+                    const endpointPath = `/api/notes/${noteId}`;
+                    await apiFetch('PUT', endpointPath, { title, content });
+                    saveStatus.textContent = '更新成功！';
+                } else {
+                    // 新增筆記 (POST)
+                    const result = await apiFetch('POST', '/api/notes', { title, content });
+                    
+                    if (result && result.id) {
+                        currentNoteId.value = result.id;
+                        deleteNoteBtn.style.display = 'inline-block';
+                        saveStatus.textContent = '新增成功！';
+                    } else {
+                         throw new Error("API 未返回新的筆記 ID。");
+                    }
+                }
+                
+                // 重新載入列表以更新 UI
+                await loadNotes(); 
+
+            } catch (err) {
+                console.error("儲存失敗: ", err);
+                saveStatus.textContent = `儲存失敗。 (${err.message})`;
+            } finally {
+                // 清除載入狀態
+                loadingSpinner.style.display = 'none';
+                saveNoteBtn.disabled = false;
+                deleteNoteBtn.disabled = false;
+                setTimeout(() => { saveStatus.textContent = ''; }, 2500);
+            }
+        });
+
+        deleteNoteBtn.addEventListener('click', async () => {
+            if (!currentUser) return;
+            const noteId = currentNoteId.value;
+            if (!noteId) return;
+
+            // 實際刪除邏輯
+            if (confirm("您確定要刪除這篇筆記嗎？此操作無法復原。")) {
+                 loadingSpinner.style.display = 'block';
+                 deleteNoteBtn.disabled = true;
+                 saveNoteBtn.disabled = true;
+                 try {
+                     const endpointPath = `/api/notes/${noteId}`;
+                     await apiFetch('DELETE', endpointPath);
+
+                     // 清空編輯器並顯示歡迎訊息
+                     noteTitle.value = '';
+                     noteContent.value = '';
+                     currentNoteId.value = '';
+                     editorContainer.style.display = 'none';
+      
