@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雲筆記 (Email 登入版)</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Google Font "Inter" -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #f97316;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        .dark .loader {
+            border-color: #374151;
+            border-top-color: #f97316;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Modal 樣式 */
+        .modal {
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .modal-active {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 transition-colors duration-300">
+
+    <div class="flex flex-col h-screen">
+        <!-- 頂部導覽列 -->
+        <header class="bg-white dark:bg-gray-800 shadow-md w-full p-4 flex justify-between items-center transition-colors duration-300">
+            <h1 class="text-xl font-bold text-orange-600">私人雲筆記 (Email 登入版)</h1>
+            <div id="auth-controls" class="flex items-center space-x-4">
+                
+                <!-- 黑暗模式切換按鈕 -->
+                <button id="theme-toggle" class="p-2 rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition">
+                    <svg id="moon-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                    <svg id="sun-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                </button>
+
+                <div id="auth-status" class="text-sm text-gray-500 dark:text-gray-400">
+                    狀態: <span id="connection-status" class="font-semibold text-red-500">未登入</span>
+                </div>
+                <button id="register-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-1 px-3 rounded-lg shadow transition duration-200">
+                    註冊
+                </button>
+                <button id="login-btn" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-1 px-3 rounded-lg shadow transition duration-200">
+                    登入
+                </button>
+                <button id="sign-out-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-1 px-3 rounded-lg shadow transition duration-200" style="display: none;">
+                    登出
+                </button>
+            </div>
+        </header>
+
+        <!-- 主內容區 -->
+        <div class="flex flex-1 overflow-hidden flex-col md:flex-row">
+            
+            <!-- 筆記列表 (側邊欄) -->
+            <aside class="w-full md:w-1/3 lg:w-1/4 bg-white dark:bg-gray-800 border-r dark:border-gray-700 overflow-y-auto p-4 transition-colors duration-300">
+                <button id="new-note-btn" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 mb-4" disabled>
+                    + 新增筆記 (請先登入)
+                </button>
+                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-gray-100">我的筆記</h2>
+                <div id="notes-list" class="space-y-2">
+                    <p class="text-gray-500 dark:text-gray-400">請先登入以載入筆記...</p>
+                </div>
+            </aside>
+
+            <!-- 筆記編輯器 -->
+            <main class="flex-1 overflow-y-auto p-6">
+                <div id="editor-container" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg dark:shadow-xl dark:shadow-gray-700/30 transition-colors duration-300" style="display: none;">
+                    <div id="loading-spinner" class="loader mx-auto mb-4" style="display: none;"></div>
+                    <input type="text" id="note-title" 
+                           class="w-full text-3xl font-bold p-2 border-b-2 border-gray-200 dark:border-gray-600 
+                                  bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100
+                                  focus:outline-none focus:border-orange-500 transition-colors duration-300" 
+                           placeholder="筆記標題...">
+                    <textarea id="note-content" 
+                              class="w-full h-96 p-2 border border-gray-200 dark:border-gray-600 
+                                     bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 
+                                     rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 mt-4 transition-colors duration-300" 
+                              placeholder="開始寫點什麼..."></textarea>
+                    
+                    <input type="hidden" id="current-note-id">
+                    
+                    <div class="flex justify-end space-x-4 mt-4">
+                        <button id="delete-note-btn" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200" style="display: none;">
+                            刪除
+                        </button>
+                        <button id="save-note-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200">
+                            儲存
+                        </button>
+                    </div>
+                    <div id="save-status" class="text-sm text-gray-500 dark:text-gray-400 mt-2 text-right"></div>
+                </div>
+                <div id="welcome-message" class="text-center p-10">
+                    <h2 class="text-2xl font-semibold text-gray-600 dark:text-gray-400">歡迎使用私人雲筆記</h2>
+                    <p class="text-gray-500 dark:text-gray-500 mt-2">請點擊右上角的 "註冊" 或 "登入" 以開始使用。</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 註冊/登入 Modal 彈出視窗 -->
+    <div id="auth-modal" class="modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center opacity-0 invisible" aria-modal="true" role="dialog">
+        <div class="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-2xl w-full max-w-sm m-4 transform scale-100 transition-all duration-300">
+            <h3 id="auth-modal-title" class="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100">使用者登入</h3>
+            
+            <form id="auth-form" class="space-y-4">
+                <input type="email" id="auth-email" placeholder="電子郵件 (作為帳號)" required
+                       class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 dark:bg-gray-700 dark:text-gray-100">
+                <input type="password" id="auth-password" placeholder="密碼 (至少 6 個字元)" required minlength="6"
+                       class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 dark:bg-gray-700 dark:text-gray-100">
+                
+                <p id="auth-message" class="text-sm text-red-500 h-5"></p>
+
+                <button type="submit" id="auth-submit-btn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition duration-200">
+                    登入
+                </button>
+            </form>
+
+            <button id="modal-close-btn" class="mt-4 w-full text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                取消
+            </button>
+        </div>
+    </div>
+
+    <!-- 應用程式邏輯 -->
+    <script type="module">
+        // 請確認這個 URL 是您的 Cloudflare Worker 部署的根 URL
+        const API_BASE_URL = 'https://my-notes-worker.kai1020622.workers.dev'; 
+        
+        // 從瀏覽器儲存中獲取 Session Token
+        let sessionToken = localStorage.getItem('sessionToken') || null;
+
+        // --- 初始化應用程式 ---
+        function initApp() {
+            console.log("Cloud Note App initializing..."); // **新增日誌以確認執行**
+            
+            // --- DOM 元素獲取 ---
+            const notesList = document.getElementById('notes-list');
+            const newNoteBtn = document.getElementById('new-note-btn');
+            const saveNoteBtn = document.getElementById('save-note-btn');
+            const deleteNoteBtn = document.getElementById('delete-note-btn');
+            const noteTitle = document.getElementById('note-title');
+            const noteContent = document.getElementById('note-content');
+            const currentNoteId = document.getElementById('current-note-id');
+            const editorContainer = document.getElementById('editor-container');
+            const welcomeMessage = document.getElementById('welcome-message');
+            const saveStatus = document.getElementById('save-status');
+            const loadingSpinner = document.getElementById('loading-spinner');
+            const connectionStatus = document.getElementById('connection-status');
+            
+            const registerBtn = document.getElementById('register-btn');
+            const loginBtn = document.getElementById('login-btn');
+            const signOutBtn = document.getElementById('sign-out-btn');
+
+            // Modal 元素
+            const authModal = document.getElementById('auth-modal');
+            const modalTitle = document.getElementById('auth-modal-title');
+            const authForm = document.getElementById('auth-form');
+            const authEmail = document.getElementById('auth-email');
+            const authPassword = document.getElementById('auth-password');
+            const authSubmitBtn = document.getElementById('auth-submit-btn');
+            const authMessage = document.getElementById('auth-message');
+            const modalCloseBtn = document.getElementById('modal-close-btn');
+
+            // 黑暗模式邏輯
+            const themeToggleBtn = document.getElementById('theme-toggle');
+            const sunIcon = document.getElementById('sun-icon');
+            const moonIcon = document.getElementById('moon-icon');
+            
+            function toggleTheme() {
+                const isDarkMode = document.body.classList.toggle('dark');
+                localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+                updateThemeIcons(isDarkMode);
+            }
+            function initializeTheme() {
+                const savedTheme = localStorage.getItem('theme');
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const shouldBeDark = savedTheme === 'dark' || (savedTheme === null && prefersDark);
+                if (shouldBeDark) { document.body.classList.add('dark'); }
+                updateThemeIcons(shouldBeDark);
+                themeToggleBtn.addEventListener('click', toggleTheme);
+            }
+            function updateThemeIcons(isDark) {
+                moonIcon.style.display = isDark ? 'none' : 'block';
+                sunIcon.style.display = isDark ? 'block' : 'none';
+            }
+            initializeTheme(); // 立即初始化主題
+
+            // --- 登入狀態處理 ---
+            function updateAuthState(isLoggedIn) {
+                if (isLoggedIn) {
+                    connectionStatus.textContent = `已登入 (Session Active)`;
+                    connectionStatus.classList.remove('text-red-500');
+                    connectionStatus.classList.add('text-green-600');
+                    loginBtn.style.display = 'none';
+                    registerBtn.style.display = 'none';
+                    signOutBtn.style.display = 'inline-block';
+                    newNoteBtn.disabled = false;
+                    newNoteBtn.textContent = '+ 新增筆記';
+                    loadNotes();
+                } else {
+                    sessionToken = null;
+                    localStorage.removeItem('sessionToken'); // 清除 Token
+                    connectionStatus.textContent = '未登入';
+                    connectionStatus.classList.remove('text-green-600');
+                    connectionStatus.classList.add('text-red-500');
+                    loginBtn.style.display = 'inline-block';
+                    registerBtn.style.display = 'inline-block';
+                    signOutBtn.style.display = 'none';
+                    newNoteBtn.disabled = true;
+                    newNoteBtn.textContent = '+ 新增筆記 (請先登入)';
+
+                    notesList.innerHTML = '<p class="text-gray-500 dark:text-gray-400">請先登入以載入筆記...</p>';
+                    editorContainer.style.display = 'none';
+                    welcomeMessage.style.display = 'block';
+                }
+            }
+
+            // 檢查初始狀態
+            updateAuthState(sessionToken !== null);
+
+
+            // --- API 請求助手 (自動附加 Session Token) ---
+            async function apiFetch(method, endpointPath, data = null, requireAuth = true) {
+                if (requireAuth && !sessionToken) {
+                    throw new Error("Authentication required. Please log in.");
+                }
+                
+                const fullUrl = API_BASE_URL + endpointPath;
+
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+
+                if (sessionToken) {
+                    // 將 Session Token 作為 Authorization Header 發送
+                    headers['Authorization'] = `Bearer ${sessionToken}`;
+                }
+                
+                // 實作指數退避 (Exponential Backoff) 
+                const MAX_RETRIES = 3;
+                for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                    try {
+                        const response = await fetch(fullUrl, {
+                            method: method,
+                            headers: headers,
+                            body: data ? JSON.stringify(data) : null
+                        });
+
+                        if (response.status === 401) {
+                            // 如果 API 返回 401 (未授權)，清除本地 token 並登出
+                            updateAuthState(false); 
+                            throw new Error("Session expired or invalid. Please log in again.");
+                        }
+
+                        if (!response.ok) {
+                            let errorBody = { message: response.statusText };
+                            try {
+                                errorBody = await response.json();
+                            } catch (e) {}
+                            
+                            // 對於 429 (Too Many Requests) 或 5xx 錯誤，嘗試重試
+                            if (response.status === 429 || response.status >= 500) {
+                                if (attempt < MAX_RETRIES - 1) {
+                                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                                    await new Promise(res => setTimeout(res, delay));
+                                    continue; // 進行下一次重試
+                                }
+                            }
+                            throw new Error(`API 錯誤: ${response.status} - ${errorBody.message || response.statusText}`);
+                        }
+                        
+                        const contentType = response.headers.get("content-type");
+                        if (contentType && contentType.includes("application/json")) {
+                            return await response.json();
+                        }
+                        return null;
+
+                    } catch (error) {
+                        if (attempt === MAX_RETRIES - 1 || error.message.includes("Session expired")) {
+                            console.error("API 請求失敗:", error);
+                            throw error;
+                        }
+                    }
+                }
+            }
+
+            // --- Modal 邏輯 ---
+            let isRegistering = false;
+
+            function showModal(isReg) {
+                isRegistering = isReg;
+                modalTitle.textContent = isReg ? '使用者註冊' : '使用者登入';
+                authSubmitBtn.textContent = isReg ? '註冊帳號' : '登入';
+                authMessage.textContent = '';
+                authEmail.value = '';
+                authPassword.value = '';
+                
+                authModal.classList.add('modal-active');
+                authEmail.focus();
+            }
+
+            function hideModal() {
+                authModal.classList.remove('modal-active');
+            }
+            
+            // --- 註冊/登入/登出按鈕事件 ---
+            registerBtn.addEventListener('click', () => showModal(true));
+            loginBtn.addEventListener('click', () => showModal(false));
+            modalCloseBtn.addEventListener('click', hideModal);
+
+            signOutBtn.addEventListener('click', () => {
+                updateAuthState(false);
+            });
+
+            authForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                authMessage.textContent = '處理中...';
+                authSubmitBtn.disabled = true;
+
+                const email = authEmail.value;
+                const password = authPassword.value;
+                const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
+
+                try {
+                    // 發送請求，不要求 Session Token
+                    const result = await apiFetch('POST', endpoint, { email, password }, false);
+                    
+                    if (isRegistering) {
+                        authMessage.textContent = '註冊成功！請使用您的新帳號登入。';
+                        // 註冊成功後自動切換到登入模式
+                        setTimeout(() => showModal(false), 2000); 
+                    } else {
+                        // 登入成功
+                        if (result && result.token) {
+                            sessionToken = result.token;
+                            localStorage.setItem('sessionToken', sessionToken);
+                            updateAuthState(true); // 觸發筆記載入
+                            hideModal();
+                        } else {
+                            throw new Error('Login failed: Token not received.');
+                        }
+                    }
+
+                } catch (error) {
+                    authMessage.textContent = `錯誤: ${error.message.includes('409') ? '電子郵件已存在。' : error.message.includes('401') ? '帳號或密碼錯誤。' : error.message}`;
+                } finally {
+                    authSubmitBtn.disabled = false;
+                }
+            });
+
+
+            // --- 核心筆記功能 (CRUD) ---
+
+            async function loadNotes() {
+                if (!sessionToken) return;
+
+                notesList.innerHTML = '<p class="text-gray-500 flex items-center dark:text-gray-400"><span class="loader w-4 h-4 mr-2"></span> 載入中...</p>';
+                try {
+                    // 請求筆記時會自動帶上 Session Token
+                    const notes = await apiFetch('GET', '/api/notes');
+                    renderNotesList(notes);
+                    
+                    if (notes.length > 0) {
+                        // 載入第一篇筆記到編輯器
+                        displayNoteInEditor(notes[0].id, notes[0].title, notes[0].content);
+                    } else {
+                        welcomeMessage.style.display = 'block';
+                        editorContainer.style.display = 'none';
+                    }
