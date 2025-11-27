@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雲筆記 (Cloudflare D1)</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Google Font "Inter" -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #f97316; /* Cloudflare 橙色 */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="flex flex-col h-screen">
+        <!-- 頂部導覽列 -->
+        <header class="bg-white shadow-md w-full p-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-orange-600">雲筆記 (Cloudflare D1)</h1>
+            <div id="auth-status" class="text-sm text-gray-500">
+                連接狀態: <span id="connection-status" class="font-semibold text-orange-500">正在初始化...</span>
+            </div>
+        </header>
+
+        <!-- 主內容區 -->
+        <div class="flex flex-1 overflow-hidden flex-col md:flex-row">
+            
+            <!-- 筆記列表 (側邊欄) -->
+            <aside class="w-full md:w-1/3 lg:w-1/4 bg-white border-r overflow-y-auto p-4">
+                <button id="new-note-btn" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 mb-4">
+                    + 新增筆記
+                </button>
+                <h2 class="text-lg font-semibold mb-2">我的筆記</h2>
+                <div id="notes-list" class="space-y-2">
+                    <p class="text-gray-500">正在載入...</p>
+                </div>
+            </aside>
+
+            <!-- 筆記編輯器 -->
+            <main class="flex-1 overflow-y-auto p-6">
+                <div id="editor-container" class="bg-white p-6 rounded-lg shadow-lg" style="display: none;">
+                    <div id="loading-spinner" class="loader mx-auto mb-4" style="display: none;"></div>
+                    <input type="text" id="note-title" class="w-full text-3xl font-bold p-2 border-b-2 border-gray-200 focus:outline-none focus:border-orange-500 mb-4" placeholder="筆記標題...">
+                    <textarea id="note-content" class="w-full h-96 p-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" placeholder="開始寫點什麼..."></textarea>
+                    
+                    <input type="hidden" id="current-note-id">
+                    
+                    <div class="flex justify-end space-x-4 mt-4">
+                        <button id="delete-note-btn" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200" style="display: none;">
+                            刪除
+                        </button>
+                        <button id="save-note-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200">
+                            儲存
+                        </button>
+                    </div>
+                    <div id="save-status" class="text-sm text-gray-500 mt-2 text-right"></div>
+                </div>
+                <div id="welcome-message" class="text-center p-10">
+                    <h2 class="text-2xl font-semibold text-gray-600">歡迎使用雲筆記</h2>
+                    <p class="text-gray-500 mt-2">請從左側選擇一篇筆記，或建立一篇新筆記。</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 應用程式邏輯 -->
+    <script type="module">
+        const API_URL = '/api/notes'; // 假設 Pages Function 端點
+        
+        // --- DOM 元素獲取 ---
+        const notesList = document.getElementById('notes-list');
+        const newNoteBtn = document.getElementById('new-note-btn');
+        const saveNoteBtn = document.getElementById('save-note-btn');
+        const deleteNoteBtn = document.getElementById('delete-note-btn');
+        const noteTitle = document.getElementById('note-title');
+        const noteContent = document.getElementById('note-content');
+        const currentNoteId = document.getElementById('current-note-id');
+        const editorContainer = document.getElementById('editor-container');
+        const welcomeMessage = document.getElementById('welcome-message');
+        const saveStatus = document.getElementById('save-status');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const connectionStatus = document.getElementById('connection-status');
+        
+        // 簡單的用戶會話 ID (用於資料隔離)
+        const sessionId = localStorage.getItem('notes_session_id') || crypto.randomUUID();
+        localStorage.setItem('notes_session_id', sessionId);
+        
+        // 狀態初始化
+        function initializeApp() {
+            connectionStatus.textContent = `已認證 (Session: ${sessionId.substring(0, 6)}...)`;
+            loadNotes();
+        }
+
+        // --- API 請求助手 ---
+        async function apiFetch(method, endpoint, data = null) {
+            const headers = {
+                'Content-Type': 'application/json',
+                // 將 Session ID 作為身份證明傳遞給後端 Function
+                'X-User-Session': sessionId
+            };
+            
+            try {
+                const response = await fetch(endpoint, {
+                    method: method,
+                    headers: headers,
+                    body: data ? JSON.stringify(data) : null
+                });
+
+                if (!response.ok) {
+                    let errorBody = { message: response.statusText };
+                    try {
+                        errorBody = await response.json();
+                    } catch (e) {
+                        // Ignore if response is not JSON
+                    }
+                    throw new Error(`API 錯誤: ${response.status} - ${errorBody.message || response.statusText}`);
+                }
+                
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    return await response.json();
+                }
+                return null;
+
+            } catch (error) {
+                console.error("API 請求失敗:", error);
+                throw error;
+            }
+        }
+
+        // --- 核心功能 ---
+
+        // 載入筆記
+        async function loadNotes() {
+            notesList.innerHTML = '<p class="text-gray-500 flex items-center"><span class="loader w-4 h-4 mr-2"></span> 載入中...</p>';
+            try {
+                const notes = await apiFetch('GET', API_URL);
+
+                renderNotesList(notes);
+                if (notes.length > 0) {
+                    // 自動選擇第一篇筆記
+                    displayNoteInEditor(notes[0].id, notes[0].title, notes[0].content);
+                } else {
+                    welcomeMessage.style.display = 'block';
+                    editorContainer.style.display = 'none';
+                }
+            } catch (error) {
+                notesList.innerHTML = `<p class="text-red-500">載入失敗！請檢查 Pages Function (API) 是否部署正確。 (${error.message})</p>`;
+                connectionStatus.textContent = `連接錯誤`;
+            }
+        }
+
+        // 渲染筆記列表
+        function renderNotesList(notes) {
+            notesList.innerHTML = '';
+            if (!notes || notes.length === 0) {
+                notesList.innerHTML = '<p class="text-gray-500">尚無筆記。點擊上方按鈕新增一篇！</p>';
+                return;
+            }
+
+            notes.forEach((note) => {
+                const noteElement = document.createElement('div');
+                noteElement.className = 'p-3 bg-gray-100 hover:bg-orange-100 rounded-lg cursor-pointer transition duration-150';
+                noteElement.textContent = note.title || '(無標題)';
+                noteElement.dataset.noteId = note.id; 
+                
+                noteElement.addEventListener('click', () => {
+                    displayNoteInEditor(note.id, note.title, note.content);
+                });
+                
+                notesList.appendChild(noteElement);
+            });
+        }
+
+        // 在編輯器中顯示筆記
+        function displayNoteInEditor(id, title, content) {
+            editorContainer.style.display = 'block';
+            welcomeMessage.style.display = 'none';
+            deleteNoteBtn.style.display = 'inline-block';
+
+            noteTitle.value = title || '';
+            noteContent.value = content || '';
+            currentNoteId.value = id;
+            saveStatus.textContent = '';
+
+            // 清除現有的 active 類別並設定新的
+            document.querySelectorAll('#notes-list div').forEach(el => {
+                el.classList.remove('ring-2', 'ring-orange-500');
+            });
+            const activeNote = document.querySelector(`[data-note-id="${id}"]`);
+            if (activeNote) {
+                activeNote.classList.add('ring-2', 'ring-orange-500');
+            }
+        }
+
+        // 處理 "新增筆記"
+        newNoteBtn.addEventListener('click', () => {
+            editorContainer.style.display = 'block';
+            welcomeMessage.style.display = 'none';
+            deleteNoteBtn.style.display = 'none';
+
+            noteTitle.value = '';
+            noteContent.value = '';
+            currentNoteId.value = ''; // 清空 ID
+            noteTitle.focus();
+            saveStatus.textContent = '請輸入新筆記的內容。';
+            
+            // 清除 active 樣式
+            document.querySelectorAll('#notes-list div').forEach(el => {
+                el.classList.remove('ring-2', 'ring-orange-500');
+            });
+        });
+
+        // 處理 "儲存筆記" (INSERT 或 UPDATE)
+        saveNoteBtn.addEventListener('click', async () => {
+            const title = noteTitle.value || '(無標題)';
+            const content = noteContent.value;
+            const noteId = currentNoteId.value;
+
+            loadingSpinner.style.display = 'block';
+            saveNoteBtn.disabled = true;
+            deleteNoteBtn.disabled = true;
+            saveStatus.textContent = '儲存中...';
+
+            try {
+                if (noteId) {
+                    // UPDATE: 使用 PUT 請求
+                    const endpoint = `${API_URL}/${noteId}`;
+                    await apiFetch('PUT', endpoint, { title, content });
+                    saveStatus.textContent = '更新成功！';
+                } else {
+                    // INSERT: 使用 POST 請求
+                    const result = await apiFetch('POST', API_URL, { title, content });
+                    
+                    if (result && result.id) {
+                        currentNoteId.value = result.id;
+                        deleteNoteBtn.style.display = 'inline-block';
+                        saveStatus.textContent = '新增成功！';
+                    } else {
+                         throw new Error("API 未返回新的筆記 ID。");
+                    }
+                }
+                
+                // 重新載入列表以更新 UI
+                await loadNotes(); 
+
+            } catch (err) {
+                console.error("儲存失敗: ", err);
+                saveStatus.textContent = '儲存失敗。請檢查 Pages Function Log。';
+            } finally {
+                loadingSpinner.style.display = 'none';
+                saveNoteBtn.disabled = false;
+                deleteNoteBtn.disabled = false;
+                setTimeout(() => { saveStatus.textContent = ''; }, 2500);
+            }
+        });
+
+        // 處理 "刪除筆記"
+        deleteNoteBtn.addEventListener('click', async () => {
+            const noteId = currentNoteId.value;
+            if (!noteId) return;
+
+            // 使用簡單的訊息框代替 confirm()
+            const confirmBox = document.createElement('div');
+            confirmBox.className = "fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50";
+            confirmBox.innerHTML = `
+                <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
+                    <p class="text-lg font-semibold mb-4">確認刪除</p>
+                    <p class="mb-6">您確定要刪除這篇筆記嗎？此操作無法復原。</p>
+                    <div class="flex justify-end space-x-3">
+                        <button id="cancel-delete" class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300">取消</button>
+                        <button id="confirm-delete" class="px-4 py-2 text-white bg-red-500 rounded-lg hover:bg-red-600">確定刪除</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(confirmBox);
+
+            document.getElementById('cancel-delete').onclick = () => document.body.removeChild(confirmBox);
+            document.getElementById('confirm-delete').onclick = async () => {
+                document.body.removeChild(confirmBox);
+                
+                loadingSpinner.style.display = 'block';
+                deleteNoteBtn.disabled = true;
+                saveNoteBtn.disabled = true;
+
+                try {
+                    // DELETE 請求
+                    const endpoint = `${API_URL}/${noteId}`;
+                    await apiFetch('DELETE', endpoint);
+
+                    // 刪除成功後，清空編輯器
+                    noteTitle.value = '';
+                    noteContent.value = '';
+                    currentNoteId.value = '';
+                    editorContainer.style.display = 'none';
+                    welcomeMessage.style.display = 'block';
+                    saveStatus.textContent = '刪除成功！';
+                    
+                    // 重新載入列表
+                    await loadNotes();
+
+                } catch (err) {
+                    console.error("刪除失敗: ", err);
+                    saveStatus.textContent = '刪除失敗。請檢查 Pages Function Log。';
+                } finally {
+                    loadingSpinner.style.display = 'none';
+                    deleteNoteBtn.disabled = false;
+                    saveNoteBtn.disabled = false;
+                    setTimeout(() => { saveStatus.textContent = ''; }, 2500);
+                }
+            };
+        });
+
+        // --- 啟動應用程式 ---
+        initializeApp();
+
+    </script>
+</body>
+</html>
+
+  
