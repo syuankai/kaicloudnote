@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>公共雲筆記 (無需登入)</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Google Font "Inter" -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* 載入指示器 */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #f97316;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        .dark .loader {
+            border-color: #374151;
+            border-top-color: #f97316;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 transition-colors duration-300">
+
+    <div class="flex flex-col h-screen">
+        <!-- 頂部導覽列 -->
+        <header class="bg-white dark:bg-gray-800 shadow-md w-full p-4 flex justify-between items-center transition-colors duration-300">
+            <h1 class="text-xl font-bold text-orange-600">公共雲筆記 (無需登入)</h1>
+            <div id="controls" class="flex items-center space-x-4">
+                
+                <!-- 黑暗模式切換按鈕 -->
+                <button id="theme-toggle" class="p-2 rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition">
+                    <svg id="moon-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                    <svg id="sun-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- 主內容區 -->
+        <div class="flex flex-1 overflow-hidden flex-col md:flex-row">
+            
+            <!-- 筆記列表 (側邊欄) -->
+            <aside class="w-full md:w-1/3 lg:w-1/4 bg-white dark:bg-gray-800 border-r dark:border-gray-700 overflow-y-auto p-4 transition-colors duration-300">
+                <button id="new-note-btn" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 mb-4">
+                    + 新增筆記
+                </button>
+                <h2 class="text-lg font-semibold mb-2 text-gray-800 dark:text-gray-100">所有筆記 (公共)</h2>
+                <div id="notes-list" class="space-y-2">
+                    <p class="text-gray-500 dark:text-gray-400">載入中...</p>
+                </div>
+            </aside>
+
+            <!-- 筆記編輯器 -->
+            <main class="flex-1 overflow-y-auto p-6">
+                <div id="editor-container" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg dark:shadow-xl dark:shadow-gray-700/30 transition-colors duration-300" style="display: none;">
+                    <div id="loading-spinner" class="loader mx-auto mb-4" style="display: none;"></div>
+                    <input type="text" id="note-title" 
+                           class="w-full text-3xl font-bold p-2 border-b-2 border-gray-200 dark:border-gray-600 
+                                  bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100
+                                  focus:outline-none focus:border-orange-500 transition-colors duration-300" 
+                           placeholder="筆記標題...">
+                    <textarea id="note-content" 
+                              class="w-full h-96 p-2 border border-gray-200 dark:border-gray-600 
+                                     bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 
+                                     rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 mt-4 transition-colors duration-300" 
+                              placeholder="開始寫點什麼..."></textarea>
+                    
+                    <input type="hidden" id="current-note-id">
+                    <input type="hidden" id="current-note-createdAt">
+                    <input type="hidden" id="current-note-updatedAt">
+
+                    <!-- 時間戳顯示區 -->
+                    <div id="timestamp-info" class="mt-4 text-sm text-gray-500 dark:text-gray-400" style="display: none;">
+                        <p>創建時間: <span id="created-at-display"></span></p>
+                        <p>更新時間: <span id="updated-at-display"></span></p>
+                    </div>
+
+                    
+                    <div class="flex justify-end space-x-4 mt-4">
+                        <!-- 下載按鈕 -->
+                        <button id="download-note-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200" style="display: none;">
+                            下載 .txt
+                        </button>
+                        <button id="delete-note-btn" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200" style="display: none;">
+                            刪除
+                        </button>
+                        <button id="save-note-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200">
+                            儲存
+                        </button>
+                    </div>
+                    <div id="save-status" class="text-sm text-gray-500 dark:text-gray-400 mt-2 text-right"></div>
+                </div>
+                <div id="welcome-message" class="text-center p-10">
+                    <h2 class="text-2xl font-semibold text-gray-600 dark:text-gray-400">歡迎使用公共雲筆記</h2>
+                    <p class="text-gray-500 dark:text-gray-500 mt-2">所有新增、編輯和刪除操作都是公開且即時可見的。</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 應用程式邏輯 -->
+    <script type="module">
+        // **重要：請檢查並替換成您實際的 Cloudflare Worker URL**
+        const API_BASE_URL = 'https://my-notes-worker.kai1020622.workers.dev'; 
+        
+        // --- 初始化應用程式 ---
+        function initApp() {
+            // !!! 檢查點 1: 確保程式碼已執行到此處 !!!
+            console.log("--- 檢查點 1: initApp 函數已啟動 ---"); 
+
+            // --- DOM 元素獲取 ---
+            const notesList = document.getElementById('notes-list');
+            const newNoteBtn = document.getElementById('new-note-btn');
+            const saveNoteBtn = document.getElementById('save-note-btn');
+            const deleteNoteBtn = document.getElementById('delete-note-btn');
+            const downloadNoteBtn = document.getElementById('download-note-btn');
+            const noteTitle = document.getElementById('note-title');
+            const noteContent = document.getElementById('note-content');
+            const currentNoteId = document.getElementById('current-note-id');
+            const currentNoteCreatedAt = document.getElementById('current-note-createdAt');
+            const currentNoteUpdatedAt = document.getElementById('current-note-updatedAt');
+            const editorContainer = document.getElementById('editor-container');
+            const welcomeMessage = document.getElementById('welcome-message');
+            const saveStatus = document.getElementById('save-status');
+            const loadingSpinner = document.getElementById('loading-spinner');
+            const timestampInfo = document.getElementById('timestamp-info');
+            const createdAtDisplay = document.getElementById('created-at-display');
+            const updatedAtDisplay = document.getElementById('updated-at-display');
+            
+            // 黑暗模式邏輯 (保持不變)
+            const themeToggleBtn = document.getElementById('theme-toggle');
+            const sunIcon = document.getElementById('sun-icon');
+            const moonIcon = document.getElementById('moon-icon');
+            
+            function toggleTheme() {
+                const isDarkMode = document.body.classList.toggle('dark');
+                localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+                updateThemeIcons(isDarkMode);
+            }
+
+            function updateThemeIcons(isDark) {
+                if (moonIcon) moonIcon.style.display = isDark ? 'none' : 'block';
+                if (sunIcon) sunIcon.style.display = isDark ? 'block' : 'none';
+            }
+
+            function initializeTheme() {
+                const savedTheme = localStorage.getItem('theme');
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const shouldBeDark = savedTheme === 'dark' || (savedTheme === null && prefersDark);
+                if (shouldBeDark) { document.body.classList.add('dark'); }
+                updateThemeIcons(shouldBeDark);
+            }
+
+            if (themeToggleBtn) {
+                themeToggleBtn.addEventListener('click', toggleTheme);
+            }
+            
+            initializeTheme();
+
+            // --- 時間格式化工具 ---
+            function formatTime(isoString) {
+                if (!isoString) return 'N/A';
+                const date = new Date(isoString);
+                return date.toLocaleString('zh-TW', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            }
+
+            // --- API 請求助手 ---
+            async function apiFetch(method, endpointPath, data = null) {
+                const fullUrl = API_BASE_URL + endpointPath;
+                
+                // !!! 檢查點 2: 檢查 API 請求的 URL !!!
+                console.log(`--- 檢查點 2: 嘗試發送 API 請求 - ${method} ${fullUrl} ---`); 
+
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+                
+                const MAX_RETRIES = 3;
+                for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                    try {
+                        const response = await fetch(fullUrl, {
+                            method: method,
+                            headers: headers,
+                            body: data ? JSON.stringify(data) : null
+                        });
+
+                        // 檢查點 3: 請求已發送並收到回應
+                        console.log(`--- 檢查點 3: 收到回應 (Status: ${response.status}) ---`); 
+
+
+                        if (!response.ok) {
+                            let errorBody = { message: response.statusText };
+                            try {
+                                errorBody = await response.json();
+                            } catch (e) {}
+                            
+                            if (response.status === 429 || response.status >= 500) {
+                                if (attempt < MAX_RETRIES - 1) {
+                                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                                    await new Promise(res => setTimeout(res, delay));
+                                    continue;
+                                }
+                            }
+                            throw new Error(`API 錯誤: ${response.status} - ${errorBody.message || response.statusText}`);
+                        }
+                        
+                        const contentType = response.headers.get("content-type");
+                        if (contentType && contentType.includes("application/json")) {
+                            return await response.json();
+                        }
+                        return null;
+
+                    } catch (error) {
+                        if (attempt === MAX_RETRIES - 1) {
+                            console.error("API 請求失敗:", error);
+                            if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                                throw new Error(`Failed to fetch: 請檢查您的 Worker URL (${API_BASE_URL}) 是否正確、服務是否正在運行，以及是否有 CORS 錯誤。`);
+                            }
+                            throw error;
+                        }
+                    }
+                }
+            }
+
+            // 應用程式會立即載入筆記
+            loadNotes(); 
+
+            // --- 核心筆記功能 (CRUD) ---
+
+            async function loadNotes() {
+                // 檢查點 4: 嘗試載入筆記
+                console.log("--- 檢查點 4: 正在呼叫 GET /api/notes ---");
+
+                notesList.innerHTML = '<p class="text-gray-500 flex items-center dark:text-gray-400"><span class="loader w-4 h-4 mr-2"></span> 載入中...</p>';
+                try {
+                    const notes = await apiFetch('GET', '/api/notes');
+                    
+                    // 檢查點 5: 成功載入筆記
+                    console.log(`--- 檢查點 5: 成功載入 ${notes.length} 篇筆記 ---`);
+                    
+                    renderNotesList(notes);
+                    
+                    if (notes.length > 0) {
+                        displayNoteInEditor(notes[0]);
+                    } else {
+                        welcomeMessage.style.display = 'block';
+                        editorContainer.style.display = 'none';
+                    }
+                } catch (error) {
+                    notesList.innerHTML = `<p class="text-red-500">載入失敗！ (${error.message})</p>`;
+                    console.error("載入筆記時發生嚴重錯誤：", error);
+                    welcomeMessage.style.display = 'block';
+                    editorContainer.style.display = 'none';
+                }
+            }
+
+            function renderNotesList(notes) {
+                notesList.innerHTML = '';
+                if (!notes || notes.length === 0) {
+                    notesList.innerHTML = '<p class="text-gray-500 dark:text-gray-400">尚無筆記。點擊上方按鈕新增一篇！</p>';
+                    return;
+                }
+                
+                notes.forEach((note) => {
+                    const noteElement = document.createElement('div');
+                    const updateTime = formatTime(note.updatedAt).split(' ')[1];
+                    
+                    noteElement.className = 'p-3 bg-gray-100 dark:bg-gray-700 hover:bg-orange-100 dark:hover:bg-orange-700/50 rounded-lg cursor-pointer transition duration-150 text-gray-800 dark:text-gray-100';
+                    noteElement.innerHTML = `
+                        <p class="font-semibold truncate">${note.title || '(無標題)'}</p>
+                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">${updateTime} 更新</p>
+                    `;
+                    noteElement.dataset.noteId = note.id; 
+                    
+                    noteElement.addEventListener('click', () => {
+                        displayNoteInEditor(note);
+                    });
+                    
+                    notesList.appendChild(noteElement);
+                });
+            }
+
+            function displayNoteInEditor(note) {
+                editorContainer.style.display = 'block';
+                welcomeMessage.style.display = 'none';
+                deleteNoteBtn.style.display = 'inline-block';
+                downloadNoteBtn.style.display = 'inline-block';
+
+                noteTitle.value = note.title || '';
+                noteContent.value = note.content || '';
+                currentNoteId.value = note.id;
+
+                currentNoteCreatedAt.value = note.createdAt;
+                currentNoteUpdatedAt.value = note.updatedAt;
+                createdAtDisplay.textContent = formatTime(note.createdAt);
+                updatedAtDisplay.textContent = formatTime(note.updatedAt);
+                timestampInfo.style.display = 'block';
+
+                saveStatus.textContent = '';
+
+                document.querySelectorAll('#notes-list div').forEach(el => {
+                    el.classList.remove('ring-2', 'ring-orange-500');
+                });
+                const activeNote = document.querySelector(`[data-note-id="${note.id}"]`);
+                if (activeNote) {
+                    activeNote.classList.add('ring-2', 'ring-orange-500');
+                }
+            }
+
+            newNoteBtn.addEventListener('click', () => {
+                editorContainer.style.display = 'block';
+                welcomeMessage.style.display = 'none';
+                deleteNoteBtn.style.display = 'none'; 
+                downloadNoteBtn.style.display = 'none';
+                timestampInfo.style.display = 'none';
+                
+                noteTitle.value = '';
+                noteContent.value = '';
+                currentNoteId.value = ''; 
+                
+                noteTitle.focus();
+                saveStatus.textContent = '請輸入新筆記的內容，點擊儲存。';
+                
+                document.querySelectorAll('#notes-list div').forEach(el => {
+                    el.classList.remove('ring-2', 'ring-orange-500');
+                });
+            });
+
+            saveNoteBtn.addEventListener('click', async () => {
+                const title = noteTitle.value || '(無標題)';
+                const content = noteContent.value;
+                const noteId = currentNoteId.value;
+
+                loadingSpinner.style.display = 'block';
+                saveNoteBtn.disabled = true;
+                deleteNoteBtn.disabled = true;
+                downloadNoteBtn.disabled = true;
+                saveStatus.textContent = '儲存中...';
+
+                try {
+                    let result;
+                    if (noteId) {
+                        result = await apiFetch('PUT', `/api/notes/${noteId}`, { title, content });
+                        saveStatus.textContent = '更新成功！';
+                    } else {
+                        result = await apiFetch('POST', '/api/notes', { title, content });
+                        
+                        if (result && result.id) {
+                            currentNoteId.value = result.id;
+                            deleteNoteBtn.style.display = 'inline-block';
+                            downloadNoteBtn.style.display = 'inline-block';
+                            saveStatus.textContent = '新增成功！';
+                        } else {
+                            throw new Error("API 未返回新的筆記 ID。");
+                        }
+                    }
+
+                    if (result && result.updatedAt) {
+                        currentNoteUpdatedAt.value = result.updatedAt;
+                        updatedAtDisplay.textContent = formatTime(result.updatedAt);
+                        if (result.createdAt) {
+                            currentNoteCreatedAt.value = result.createdAt;
+                            createdAtDisplay.textContent = formatTime(result.createdAt);
+                        }
+                        timestampInfo.style.display = 'block';
+                    }
+                    
+                    await loadNotes();
+
+                } catch (err) {
+                    console.error("儲存失敗: ", err);
+                    saveStatus.textContent = `儲存失敗。 (${err.message})`;
+                } finally {
+                    loadingSpinner.style.display = 'none';
+                    saveNoteBtn.disabled = false;
+                    deleteNoteBtn.disabled = false;
+                    downloadNoteBtn.disabled = false;
+                    setTimeout(() => { saveStatus.textContent = ''; }, 2500);
+                }
+            });
+
+            deleteNoteBtn.addEventListener('click', async () => {
+                const noteId = currentNoteId.value;
+                i
