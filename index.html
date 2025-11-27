@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloudflare Notes (KV Web 部署版)</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Lucide Icons -->
+    <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+    <div id="app" class="flex h-screen w-full">
+        
+        <!-- 筆記列表 (側邊欄) -->
+        <aside class="w-full md:w-1/3 lg:w-1/4 h-screen bg-white border-r border-slate-200 flex flex-col">
+            <header class="p-4 border-b border-slate-200 flex justify-between items-center flex-shrink-0">
+                <h1 class="text-xl font-bold text-slate-900">CF 筆記 (KV)</h1>
+                <button id="new-note-btn" class="p-2 rounded-lg text-slate-600 hover:bg-blue-100 hover:text-blue-600 transition-colors" title="新增筆記">
+                    <i data-lucide="plus-circle" class="w-5 h-5"></i>
+                </button>
+            </header>
+            
+            <nav id="notes-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+                <div id="notes-loader" class="p-4 text-center text-slate-500">
+                    <i data-lucide="loader-2" class="w-5 h-5 animate-spin inline-block mr-2"></i>載入中...
+                </div>
+            </nav>
+        </aside>
+
+        <!-- 筆記編輯器 (主內容區) -->
+        <main id="editor-container" class="w-full md:w-2/3 lg:w-3/4 h-screen flex-col bg-slate-50 hidden md:flex">
+            <header class="p-4 border-b border-slate-200 flex justify-end items-center space-x-2 flex-shrink-0 bg-white">
+                <span id="status-indicator" class="text-sm text-slate-500 mr-auto">請選擇筆記</span>
+                <button id="delete-note-btn" class="hidden items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-red-600 bg-red-100 hover:bg-red-200 transition-colors" title="刪除">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+                <button id="save-note-btn" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors" disabled>
+                    <i data-lucide="save" class="w-4 h-4"></i>
+                    <span>儲存</span>
+                </button>
+            </header>
+            
+            <textarea id="note-editor" class="w-full h-full p-6 text-base bg-slate-50 resize-none focus:outline-none" placeholder="請選擇一篇筆記或新增筆記..." disabled></textarea>
+        </main>
+        
+        <!-- 手機版提示 -->
+        <div id="mobile-placeholder" class="w-full h-screen flex-col items-center justify-center bg-slate-50 flex md:hidden p-8 text-center">
+            <i data-lucide="pen-square" class="w-12 h-12 text-blue-500 mb-4"></i>
+            <h2 class="text-xl font-semibold mb-2">請選擇一篇筆記</h2>
+            <p class="text-slate-600">在左側列表選擇一篇筆記以開始編輯，或新增一篇筆記。</p>
+        </div>
+    </div>
+
+    <script>
+        // -----------------------------------------------------------------
+        // Cloudflare App (Client-side Logic)
+        // -----------------------------------------------------------------
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            // DOM 元素
+            const notesListEl = document.getElementById('notes-list');
+            const notesLoader = document.getElementById('notes-loader');
+            const noteEditorEl = document.getElementById('note-editor');
+            const saveNoteBtn = document.getElementById('save-note-btn');
+            const deleteNoteBtn = document.getElementById('delete-note-btn');
+            const newNoteBtn = document.getElementById('new-note-btn');
+            const statusIndicator = document.getElementById('status-indicator');
+            const editorContainer = document.getElementById('editor-container');
+            const mobilePlaceholder = document.getElementById('mobile-placeholder');
+            const notesListContainer = document.querySelector('aside');
+
+            let currentNotes = [];
+            let selectedNoteId = null;
+            let saveTimeout = null;
+            
+            // 【重要變更】您的 Cloudflare Worker API 基礎網址
+            const WORKER_BASE_URL = 'https://notes-api-worker.kai1020622.workers.dev'; 
+
+            // 簡易的 "使用者 ID" (與後端 Worker.js 配合)
+            let userToken = localStorage.getItem('notesUserToken');
+            if (!userToken) {
+                userToken = crypto.randomUUID();
+                localStorage.setItem('notesUserToken', userToken);
+            }
+
+            // API 輔助函式
+            async function apiFetch(endpoint, options = {}) {
+                options.headers = {
+                    ...options.headers,
+                    'Content-Type': 'application/json',
+                    'X-User-Token': userToken // 傳送使用者 ID 給後端
+                };
+
+                // 使用完整的 Worker 網址來呼叫 API
+                const response = await fetch(`${WORKER_BASE_URL}/api${endpoint}`, options);
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({error: '未知 API 錯誤'}));
+                    throw new Error(error.error || 'API 請求失敗');
+                }
+                return response.json();
+            }
+
+            // 載入所有筆記
+            async function loadNotes() {
+                try {
+                    notesLoader.style.display = 'block';
+                    // 檢查 Worker URL 是否正確配置
+                    if (WORKER_BASE_URL.includes('your-username')) {
+                        throw new Error('請在程式碼中配置正確的 WORKER_BASE_URL。');
+                    }
+                    
+                    const notes = await apiFetch('/notes');
+                    // 確保 updatedAt 是數字，然後在客戶端排序
+                    currentNotes = notes.map(n => ({
+                        ...n,
+                        updatedAt: typeof n.updatedAt === 'number' ? n.updatedAt : 0
+                    })).sort((a, b) => b.updatedAt - a.updatedAt); 
+                    
+                    renderNotesList();
+                    notesLoader.style.display = 'none';
+                } catch (error) {
+                    console.error("載入筆記失敗:", error);
+                    notesLoader.style.display = 'none';
+                    notesListEl.innerHTML += `<p class="p-4 text-red-500">載入失敗。請檢查 Worker 網址或 KV 綁定。錯誤: ${error.message}</p>`;
+                }
+            }
+
+            // 渲染筆記列表
+            function renderNotesList() {
+                // 清空但不移除 Loader
+                const existingLoader = notesListEl.querySelector('#notes-loader');
+                notesListEl.innerHTML = '';
+                if (existingLoader) notesListEl.appendChild(existingLoader);
+
+                if (currentNotes.length === 0 && notesLoader.style.display === 'none') {
+                    notesListEl.innerHTML += '<p class="p-4 text-center text-slate-500">尚未建立任何筆記。</p>';
+                }
+
+                currentNotes.forEach(note => {
+                    const item = document.createElement('div');
+                    item.dataset.id = note.id;
+                    item.className = `p-3 rounded-lg cursor-pointer transition-colors ${
+                        note.id === selectedNoteId 
+                            ? 'bg-blue-100 text-blue-800' 
+                            : 'hover:bg-slate-100'
+                    }`;
+                    
+                    const title = note.content.split('\n')[0] || '新筆記';
+                    item.innerHTML = `
+                        <h3 class="font-medium truncate">${title.substring(0, 30)}</h3>
+                        <p class="text-sm text-slate-500 truncate">${(note.content.split('\n')[1] || '...').substring(0, 40)}</p>
+                    `;
+                    notesListEl.appendChild(item);
+                });
+            }
+
+            // 選取筆記
+            function selectNote(id) {
+                const note = currentNotes.find(n => n.id === id);
+                if (!note) return;
+                
+                selectedNoteId = id;
+                noteEditorEl.value = note.content;
+                noteEditorEl.disabled = false;
+                
+                setSaveButtonState('saved', '已載入');
+                deleteNoteBtn.classList.remove('hidden');
+                
+                renderNotesList(); 
+                
+                if (isMobile()) showEditor();
+            }
+
+            // 清空編輯器 (準備新增)
+            function clearEditor() {
+                selectedNoteId = null;
+                noteEditorEl.value = '';
+                noteEditorEl.disabled = false;
+                noteEditorEl.focus();
+                
+                setSaveButtonState('dirty', '新筆記');
+                deleteNoteBtn.classList.add('hidden');
+                
+                renderNotesList(); 
+                
+                if (isMobile()) showEditor();
+            }
+
+            // 儲存筆記 (新增或更新)
+            async function saveNote() {
+                if (saveNoteBtn.disabled) return;
+                
+                const content = noteEditorEl.value;
+                setSaveButtonState('saving');
+
+                try {
+                    let savedNote;
+                    if (selectedNoteId) {
+                        savedNote = await apiFetch(`/notes/${selectedNoteId}`, {
+                            method: 'PUT',
+                            body: JSON.stringify({ content })
+                        });
+                        const index = currentNotes.findIndex(n => n.id === selectedNoteId);
+                        currentNotes[index] = savedNote;
+                    } else {
+                        savedNote = await apiFetch('/notes', {
+                            method: 'POST',
+                            body: JSON.stringify({ content })
+                        });
+                        currentNotes.push(savedNote);
+                        selectedNoteId = savedNote.id;
+                    }
+                    
+                    setSaveButtonState('saved');
+                    currentNotes.sort((a, b) => b.updatedAt - a.updatedAt);
+                    renderNotesList();
+                    
+                } catch (error) {
+                    console.error("儲存失敗:", error);
+                    setSaveButtonState('error', `儲存失敗: ${error.message}`);
+                }
+            }
+
+            // 刪除筆記
+            async function deleteNote() {
+                if (!selectedNoteId) return;
+                
+                try {
+                    await apiFetch(`/notes/${selectedNoteId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    currentNotes = currentNotes.filter(n => n.id !== selectedNoteId);
+                    clearEditor();
+                    setSaveButtonState('disabled', '請選擇筆記');
+                    renderNotesList();
+                    
+                    if (isMobile()) showNotesList();
+                    
+                } catch (error) {
+                    console.error("刪除失敗:", error);
+                    statusIndicator.textContent = '刪除失敗';
+                }
+            }
+            
+            // UI 狀態控制
+            function setSaveButtonState(state, message = '') {
+                clearTimeout(saveTimeout);
+                const icon = saveNoteBtn.querySelector('i');
+                const text = saveNoteBtn.querySelector('span');
+                const baseClass = "flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors";
+
+                if (state === 'dirty') {
+                    saveNoteBtn.disabled = false;
+                    saveNoteBtn.className = `${baseClass} text-white bg-blue-600 hover:bg-blue-700`;
+                    icon.setAttribute('data-lucide', 'save');
+                    if (text) text.textContent = '儲存';
+                    statusIndicator.textContent = message || '有未儲存的變更';
+                } else if (state === 'saving') {
+                    saveNoteBtn.disabled = true;
+                    saveNoteBtn.className = `${baseClass} text-slate-500 bg-slate-200 cursor-not-allowed`;
+                    icon.setAttribute('data-lucide', 'loader-2');
+                    icon.classList.add('animate-spin');
+                    if (text) text.textContent = '儲存中...';
+                    statusIndicator.textContent = '儲存中...';
+                } else if (state === 'saved') {
+                    saveNoteBtn.disabled = true;
+                    saveNoteBtn.className = `${baseClass} text-green-700 bg-green-200 cursor-not-allowed`;
+                    icon.classList.remove('animate-spin');
+                    icon.setAttribute('data-lucide', 'check');
+                    if (text) text.textContent = '已儲存';
+                    statusIndicator.textContent = message || '已同步';
+                    saveTimeout = setTimeout(() => { statusIndicator.textContent = ''; }, 2000);
+                } else if (state === 'error') {
+                    saveNoteBtn.disabled = false;
+                    saveNoteBtn.className = `${baseClass} text-white bg-red-600 hover:bg-red-700`;
+                    icon.classList.remove('animate-spin');
+                    icon.setAttribute('data-lucide', 'alert-circle');
+                    if (text) text.textContent = '重試';
+                    statusIndicator.textContent = message || '儲存失敗!';
+                } else if (state === 'disabled') {
+                    saveNoteBtn.disabled = true;
+                    saveNoteBtn.className = `${baseClass} text-slate-500 bg-slate-200 cursor-not-allowed`;
+                    icon.classList.remove('animate-spin');
+                    icon.setAttribute('data-lucide', 'save');
+                    if (text) text.textContent = '儲存';
+                    statusIndicator.textContent = message || '請選擇筆記';
+                }
+                lucide.createIcons();
+            }
+
+            // 事件綁定
+            newNoteBtn.addEventListener('click', clearEditor);
+            saveNoteBtn.addEventListener('click', saveNote);
+            deleteNoteBtn.addEventListener('click', deleteNote);
+            noteEditorEl.addEventListener('input', () => setSaveButtonState('dirty'));
+            notesListEl.addEventListener('click', (e) => {
+                const noteItem = e.target.closest('[data-id]');
+                if (noteItem) {
+                    selectNote(noteItem.dataset.id);
+                }
+            });
+
+            // 手機版視圖切換
+            function isMobile() { return window.innerWidth < 768; }
+            function showEditor() {
+                editorContainer.classList.remove('hidden');
+                editorContainer.classList.add('flex');
+                mobilePlaceholder.classList.add('hidden');
+                notesListContainer.classList.add('hidden');
+                notesListContainer.classList.remove('flex');
+            }
+            function showNotesList() {
+                editorContainer.classList.add('hidden');
+                editorContainer.classList.remove('flex');
+                mobilePlaceholder.classList.add('hidden');
+                notesListContainer.classList.remove('hidden');
+                notesListContainer.classList.add('flex');
+            }
+            
+            // 初始化
+            lucide.createIcons();
+            loadNotes(); 
+            setSaveButtonState('disabled');
+        });
+    </script>
+</body>
+</html>
+
